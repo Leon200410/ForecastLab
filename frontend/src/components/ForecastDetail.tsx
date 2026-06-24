@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { fmtDateTime, fmtOdds, pct, signMoney, useAsync, winProfit } from '../lib'
+import { Loading } from './ui'
 
 export default function ForecastDetail({ id, url, onClose, onChanged }: {
   id: string; url?: string | null; onClose: () => void; onChanged: () => void
@@ -16,7 +17,7 @@ export default function ForecastDetail({ id, url, onClose, onChanged }: {
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        {loading && <div className="empty">加载中…</div>}
+        {loading && <Loading />}
         {fc && (
           <>
             <div className="row spread">
@@ -26,13 +27,17 @@ export default function ForecastDetail({ id, url, onClose, onChanged }: {
               </h3>
               <button className="btn ghost sm" onClick={onClose}>关闭</button>
             </div>
-            <div className="row" style={{ gap: 16, margin: '8px 0 14px' }}>
+            <div className="row" style={{ gap: 16, margin: '8px 0 14px', flexWrap: 'wrap' }}>
               <span>Agent <b>{pct(fc.agent_prob)}</b></span>
+              {fc.agent_prob_calibrated != null && (
+                <span className="muted" title="按历史已揭晓样本校准后的概率">校准 <b>{pct(fc.agent_prob_calibrated)}</b></span>
+              )}
               <span className="muted">市场 {pct(fc.market_prob_at_analysis)}</span>
               <span className="muted">置信 {fc.confidence}</span>
               <span className={`pill ${fc.status === 'resolved' ? 'resolved' : 'open'}`}>
                 {fc.status === 'resolved' ? '已揭晓' : '进行中'}
               </span>
+              {fc.prompt_version && <span className="muted" style={{ fontSize: 11 }}>prompt {fc.prompt_version}</span>}
               {fc.status === 'resolved' && fc.brier != null && (
                 <span className="muted">Brier {fc.brier.toFixed(3)} / 市场 {fc.market_brier?.toFixed(3)}</span>
               )}

@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { round2 } from '../lib'
+import { useToast } from './Toast'
+import { Spinner } from './ui'
 import type { Position, Side } from '../types'
 
 export default function BetForm({ position, onClose, onDone }: {
   position: Position; onClose: () => void; onDone: () => void
 }) {
+  const toast = useToast()
   const yesPrice = position.market_current_prob ?? position.market_prob_at_analysis
   const [side, setSide] = useState<Side>('YES')
   const [stake, setStake] = useState(100)
@@ -13,22 +16,28 @@ export default function BetForm({ position, onClose, onDone }: {
   const [note, setNote] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
 
   function pick(s: Side) {
     setSide(s)
     setEntry(round2(s === 'YES' ? yesPrice : 1 - yesPrice))
   }
 
-  const potential = entry > 0 ? (stake * (1 - entry)) / entry : 0
+  const stakeOk = Number.isFinite(stake) && stake > 0
+  const entryOk = Number.isFinite(entry) && entry > 0 && entry < 1
+  const valid = stakeOk && entryOk
+  const potential = entryOk ? (stake * (1 - entry)) / entry : 0
 
   async function submit() {
     setBusy(true)
     setErr(null)
     try {
       await api.placeBet({ forecast_id: position.id, side, stake, entry_prob: entry, note: note || undefined })
+      toast(`已记录押注:${side} $${stake} @ ${entry}`, 'success')
       onDone()
     } catch (e) {
       setErr((e as Error).message)
+      setConfirming(false)
     } finally {
       setBusy(false)
     }
@@ -50,15 +59,17 @@ export default function BetForm({ position, onClose, onDone }: {
           </div>
         </div>
 
-        <div className="row" style={{ gap: 12 }}>
+        <div className="row" style={{ gap: 12, alignItems: 'flex-start' }}>
           <div className="field" style={{ flex: 1 }}>
             <label>注码(虚拟 USD)</label>
             <input type="number" min={1} value={stake} onChange={(e) => setStake(Number(e.target.value))} />
+            {!stakeOk && <span className="field-err">注码需大于 0</span>}
           </div>
           <div className="field" style={{ flex: 1 }}>
             <label>入场价(该侧,0–1)</label>
             <input type="number" min={0.01} max={0.99} step={0.01} value={entry}
               onChange={(e) => setEntry(Number(e.target.value))} />
+            {!entryOk && <span className="field-err">入场价需在 0 与 1 之间</span>}
           </div>
         </div>
 
@@ -68,13 +79,29 @@ export default function BetForm({ position, onClose, onDone }: {
         </div>
 
         <div className="notice" style={{ marginBottom: 14 }}>
-          赔率 <b>{entry > 0 ? (1 / entry).toFixed(2) : '—'}x</b> · 押对总返还 <b>${entry > 0 ? (stake / entry).toFixed(2) : '0'}</b>(净赚 <b>+${potential.toFixed(2)}</b>),押错亏 <b>−${stake.toFixed(2)}</b>。纸面记录,从虚拟余额扣减,不接支付。
+          赔率 <b>{entryOk ? (1 / entry).toFixed(2) : '—'}x</b> · 押对总返还 <b>${entryOk ? (stake / entry).toFixed(2) : '0'}</b>(净赚 <b>+${potential.toFixed(2)}</b>),押错亏 <b>−${stakeOk ? stake.toFixed(2) : '0'}</b>。纸面记录,从虚拟余额扣减,不接支付。
         </div>
 
         {err && <div className="error" style={{ marginBottom: 10 }}>{err}</div>}
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn ghost" onClick={onClose}>取消</button>
-          <button className="btn" disabled={busy} onClick={submit}>{busy ? '提交中…' : '确认押注'}</button>
+          {confirming ? (
+            <>
+              <span className="muted" style={{ marginRight: 'auto', fontSize: 12.5 }}>
+                确认:{side} ${stake} @ {entry}?
+              </span>
+              <button className="btn ghost" disabled={busy} onClick={() => setConfirming(false)}>返回</button>
+              <button className="btn" disabled={busy} onClick={submit}>
+                {busy ? <><Spinner /> 提交中…</> : '确定提交'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn ghost" onClick={onClose}>取消</button>
+              <button className="btn" disabled={!valid} onClick={() => { setErr(null); setConfirming(true) }}>
+                确认押注
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

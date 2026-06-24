@@ -39,24 +39,46 @@ def calibration(points: list[tuple[float, int]], n_buckets: int = 10) -> list[di
     return buckets
 
 
+def _brier_mean(rows: list[dict], key: str) -> float:
+    return round(sum(brier(r[key], r["outcome"]) for r in rows) / len(rows), 4)
+
+
 def summarize_forecasts(resolved: list[dict]) -> dict:
-    """`resolved`: list of {agent_prob, market_prob, outcome}. Returns agent vs market."""
+    """`resolved`: list of {agent_prob, market_prob, outcome, [agent_prob_cal],
+    [prompt_version]}. Returns agent vs market, plus calibrated Brier and a
+    per-prompt-version breakdown when those extra fields are present."""
     n = len(resolved)
     if n == 0:
         return {"n": 0}
-    ab = sum(brier(r["agent_prob"], r["outcome"]) for r in resolved) / n
-    mb = sum(brier(r["market_prob"], r["outcome"]) for r in resolved) / n
+    ab = _brier_mean(resolved, "agent_prob")
+    mb = _brier_mean(resolved, "market_prob")
     acc = sum(accuracy(r["agent_prob"], r["outcome"]) for r in resolved) / n
     ll = sum(log_loss(r["agent_prob"], r["outcome"]) for r in resolved) / n
-    return {
+    out = {
         "n": n,
-        "agent_brier": round(ab, 4),
-        "market_brier": round(mb, 4),
+        "agent_brier": ab,
+        "market_brier": mb,
         "beats_market": ab < mb,
         "accuracy": round(acc, 4),
         "log_loss": round(ll, 4),
         "calibration": calibration([(r["agent_prob"], r["outcome"]) for r in resolved]),
     }
+    # calibrated Brier over forecasts that carried a calibrated prob — does it help?
+    cal = [r for r in resolved if r.get("agent_prob_cal") is not None]
+    if cal:
+        out["n_calibrated"] = len(cal)
+        out["agent_brier_calibrated"] = _brier_mean(cal, "agent_prob_cal")
+    # per-prompt-version breakdown so prompt iterations can be compared head-to-head
+    versions: dict[str, list[dict]] = {}
+    for r in resolved:
+        versions.setdefault(r.get("prompt_version") or "?", []).append(r)
+    if len(versions) > 1:
+        out["by_version"] = {
+            v: {"n": len(rs), "agent_brier": _brier_mean(rs, "agent_prob"),
+                "market_brier": _brier_mean(rs, "market_prob")}
+            for v, rs in sorted(versions.items())
+        }
+    return out
 
 
 # ---- betting / portfolio math ----------------------------------------------

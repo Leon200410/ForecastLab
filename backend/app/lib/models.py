@@ -48,12 +48,14 @@ class ForecastRun(BaseModel):
 class Forecast(BaseModel):
     id: str
     market_id: str
-    agent_prob: float                         # aggregated YES prob
+    agent_prob: float                         # aggregated YES prob (raw ensemble — scored honestly)
+    agent_prob_calibrated: Optional[float] = None  # raw prob remapped via resolved-history calibration
     market_prob_at_analysis: float            # baseline snapshot
     confidence: Confidence
     rationale: str
     key_factors: list[str]
     runs: list[ForecastRun]
+    prompt_version: str = ""                   # which prompt set produced this (eval compares versions)
     retrieved_lessons: list[str] = []         # injected past reviews (traceable)
     evidence: list[Evidence] = []
     created_at: str

@@ -50,8 +50,13 @@ class Settings:
 
     search_provider: str = os.getenv("SEARCH_PROVIDER", "tavily").strip() or "tavily"
     search_api_key: str = os.getenv("SEARCH_API_KEY", "").strip()
-    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "local").strip() or "local"
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "fastembed").strip() or "fastembed"
+    fastembed_model: str = (os.getenv("FASTEMBED_MODEL",
+                                      "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2").strip()
+                            or "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
     voyage_api_key: str = os.getenv("VOYAGE_API_KEY", "").strip()
+    # cosine floor for KB retrieval — below this a past lesson is too unrelated to inject
+    kb_min_score: float = _f("KB_MIN_SCORE", "0.2")
 
     poll_interval_min: int = _i("POLL_INTERVAL_MIN", "60")
     default_stake_usd: float = _f("DEFAULT_STAKE_USD", "100")
@@ -61,9 +66,31 @@ class Settings:
     forecaster_model: str = os.getenv("FORECASTER_MODEL", "claude-sonnet-4-6").strip()
     cheap_model: str = os.getenv("CHEAP_MODEL", "claude-haiku-4-5-20251001").strip()
     ensemble_n: int = _i("ENSEMBLE_N", "3")
+    # max LangGraph steps per agent run — caps runaway tool-call loops (cost guard).
+    # Each ReAct cycle costs ~2 steps (model + tool); a reasoning model doing a few
+    # searches needs >12, so 12 made every run hit GraphRecursionError → no JSON. 30
+    # gives comfortable headroom while still bounding cost (the budget guard caps spend).
+    agent_recursion_limit: int = _i("AGENT_RECURSION_LIMIT", "30")
+    # retries (exponential backoff + jitter) on transient LLM failures (429/5xx/timeout)
+    llm_max_retries: int = _i("LLM_MAX_RETRIES", "3")
+    # disk-cache entry TTL in hours (0 = never expire; prompts already roll over daily by key)
+    cache_ttl_hours: int = _i("CACHE_TTL_HOURS", "0")
 
     # auto-pull markets on startup if store is empty (disable in tests)
     auto_ingest: bool = os.getenv("AUTO_INGEST", "1") == "1"
+    # browser origins allowed by CORS (comma-separated). Default: local dev (Vite + compose).
+    cors_origins: list[str] = [
+        o.strip() for o in os.getenv(
+            "CORS_ORIGINS", "http://localhost:5173,http://localhost:8080").split(",")
+        if o.strip()
+    ]
+    # optional API tokens for an internal team: "tok1:alice,tok2:bob". Empty = auth
+    # OFF (open, identity falls back to the X-User header or "local"). Light by design:
+    # no JWT/RBAC/multi-tenant — just attribution + an optional gate.
+    api_tokens: dict[str, str] = {
+        p.split(":", 1)[0].strip(): p.split(":", 1)[1].strip()
+        for p in os.getenv("API_TOKENS", "").split(",") if ":" in p
+    }
 
     data_dir: Path = DATA_DIR
     cache_dir: Path = CACHE_DIR

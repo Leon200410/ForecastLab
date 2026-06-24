@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { fmtDate, fmtDateTime, fmtOdds, pct, pnlClass, signMoney, useAsync, winProfit } from '../lib'
+import { useToast } from '../components/Toast'
+import { ErrorNote, Loading } from '../components/ui'
 import type { Position } from '../types'
 import BetForm from '../components/BetForm'
 import ForecastDetail from '../components/ForecastDetail'
@@ -22,8 +24,8 @@ export default function PositionsPage() {
         </label>
       </div>
 
-      {loading && <div className="empty">加载中…</div>}
-      {error && <div className="error">{error}</div>}
+      {loading && <Loading />}
+      {error && <ErrorNote error={error} onRetry={reload} />}
       {data && rows.length === 0 && (
         <div className="empty">还没有分析。去「盘子浏览」选一个盘子点「分析」。</div>
       )}
@@ -58,12 +60,21 @@ export default function PositionsPage() {
 function Row({ p, onBet, onDetail, onChanged }: {
   p: Position; onBet: () => void; onDetail: () => void; onChanged: () => void
 }) {
+  const toast = useToast()
   const [busy, setBusy] = useState(false)
   const resolved = p.status === 'resolved'
 
   async function review() {
     setBusy(true)
-    try { await api.review(p.id) } finally { setBusy(false); onChanged() }
+    try {
+      await api.review(p.id)
+      toast('已生成复盘并写入知识库。', 'success')
+    } catch (e) {
+      toast('复盘失败:' + (e as Error).message, 'error')
+    } finally {
+      setBusy(false)
+      onChanged()
+    }
   }
 
   return (

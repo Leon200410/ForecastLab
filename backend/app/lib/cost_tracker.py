@@ -1,13 +1,23 @@
-"""LLM spend tracker with a soft cap (PRD §9).
+"""LLM spend tracker with a soft per-day cap (PRD §9).
 
 Estimates USD from token counts (rough), accumulates per-process and to a log
-file, and raises BudgetExceeded once MAX_SPEND_USD is hit so a runaway loop stops.
+file, and raises BudgetExceeded once today's spend hits MAX_SPEND_USD so a
+runaway loop stops. A small state snapshot (cost_state.json) is restored on
+startup so accounting and the daily cap survive a process restart.
 """
 import json
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 from ..config import settings
+
+_BEIJING = timezone(timedelta(hours=8))  # daily window aligns with the app's display tz
+
+
+def _today() -> str:
+    return datetime.now(_BEIJING).strftime("%Y-%m-%d")
+
 
 # Rough per-1M-token USD (input, output). Conservative; only used for the soft cap.
 _PRICES = {
@@ -19,7 +29,14 @@ _PRICES = {
 }
 
 _lock = threading.Lock()
-_log_path = settings.data_dir / "cost_log.jsonl"
+
+
+def _log_path():
+    return settings.data_dir / "cost_log.jsonl"
+
+
+def _state_path():
+    return settings.data_dir / "cost_state.json"
 
 
 class BudgetExceeded(RuntimeError):
@@ -28,8 +45,39 @@ class BudgetExceeded(RuntimeError):
 
 class CostTracker:
     def __init__(self) -> None:
-        self.total_usd = 0.0
-        self.calls = 0
+        self.total_usd = 0.0   # all-time cumulative (restored on startup)
+        self.calls = 0         # all-time call count
+        self.day = _today()
+        self.day_usd = 0.0     # today's spend — what the cap is enforced against
+        self.by_kind: dict[str, float] = {}  # all-time spend attributed per stage/purpose
+
+    def restore(self) -> None:
+        """Load the persisted snapshot so spend/cap survive a restart (call at startup)."""
+        try:
+            with open(_state_path(), encoding="utf-8") as f:
+                s = json.load(f)
+            self.total_usd = float(s.get("total_usd", 0.0))
+            self.calls = int(s.get("calls", 0))
+            self.day = s.get("day") or _today()
+            self.day_usd = float(s.get("day_usd", 0.0))
+            self.by_kind = {str(k): float(v) for k, v in (s.get("by_kind") or {}).items()}
+            self._rollover()
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def _rollover(self) -> None:
+        today = _today()
+        if self.day != today:
+            self.day, self.day_usd = today, 0.0
+
+    def _persist(self) -> None:
+        try:
+            with open(_state_path(), "w", encoding="utf-8") as f:
+                json.dump({"total_usd": round(self.total_usd, 6), "calls": self.calls,
+                           "day": self.day, "day_usd": round(self.day_usd, 6),
+                           "by_kind": {k: round(v, 6) for k, v in self.by_kind.items()}}, f)
+        except OSError:
+            pass
 
     def _price(self, model: str) -> tuple[float, float]:
         m = model.lower()
@@ -45,28 +93,36 @@ class CostTracker:
     def record(self, model: str, in_tokens: int, out_tokens: int, kind: str = "llm") -> None:
         usd = self.estimate(model, in_tokens, out_tokens)
         with _lock:
+            self._rollover()
             self.total_usd += usd
+            self.day_usd += usd
             self.calls += 1
+            self.by_kind[kind] = self.by_kind.get(kind, 0.0) + usd
             try:
-                with open(_log_path, "a", encoding="utf-8") as f:
+                with open(_log_path(), "a", encoding="utf-8") as f:
                     f.write(json.dumps({
                         "t": time.time(), "kind": kind, "model": model,
                         "in": in_tokens, "out": out_tokens, "usd": round(usd, 6),
+                        "day_usd": round(self.day_usd, 6),
                         "total_usd": round(self.total_usd, 6),
                     }) + "\n")
             except OSError:
                 pass
+            self._persist()
 
     def check(self) -> None:
-        if self.total_usd >= settings.max_spend_usd:
+        self._rollover()
+        if self.day_usd >= settings.max_spend_usd:
             raise BudgetExceeded(
-                f"MAX_SPEND_USD={settings.max_spend_usd} reached "
-                f"(spent ~${self.total_usd:.4f}, {self.calls} calls)."
+                f"MAX_SPEND_USD={settings.max_spend_usd}/day reached "
+                f"(today ~${self.day_usd:.4f}, {self.calls} calls all-time)."
             )
 
     def summary(self) -> dict:
-        return {"total_usd": round(self.total_usd, 6), "calls": self.calls,
-                "max_spend_usd": settings.max_spend_usd}
+        self._rollover()
+        return {"total_usd": round(self.total_usd, 6), "today_usd": round(self.day_usd, 6),
+                "calls": self.calls, "max_spend_usd": settings.max_spend_usd, "day": self.day,
+                "by_kind": {k: round(v, 6) for k, v in sorted(self.by_kind.items())}}
 
 
 tracker = CostTracker()

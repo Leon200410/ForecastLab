@@ -9,11 +9,25 @@ Binary (Yes/No) legs only. YES implied prob = outcomePrices[0]. closed + price~1
 -> resolved; closed-but-ambiguous -> void. Any API failure -> empty (never faked).
 """
 import json
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 
 GAMMA = "https://gamma-api.polymarket.com"
+
+
+def _deadline_passed(iso) -> bool:
+    """True if the market's close/end time is in the past (UTC)."""
+    if not iso:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) >= dt
 
 # "polymarket" if the last list call hit the live API, "none" if it failed.
 last_source = "unknown"
@@ -63,17 +77,23 @@ def _price_status(m: dict):
     except (TypeError, ValueError):
         yes = None
     closed = bool(m.get("closed"))
+    ended = _deadline_passed(m.get("endDate") or m.get("endDateIso"))
+    decisive = yes is not None and (yes >= 0.99 or yes <= 0.01)
     status, resolution, resolved_at = "open", None, None
-    if closed:
+    # Polymarket flips `closed` only after the UMA dispute window. Settle earlier when the
+    # deadline has passed AND the price is decisive (~0/1) — the outcome is effectively known
+    # (otherwise a clearly-decided position hangs as "open" until Polymarket finalizes).
+    if closed or (ended and decisive):
         if yes is None:
             return None
         if yes >= 0.99:
             status, resolution = "resolved", 1
         elif yes <= 0.01:
             status, resolution = "resolved", 0
-        else:
+        elif closed:  # truly closed but ambiguous price -> void; if only ended, keep waiting
             status = "void"
-        resolved_at = m.get("endDate") or m.get("endDateIso")
+        if status != "open":
+            resolved_at = m.get("endDate") or m.get("endDateIso")
     return yes, status, resolution, resolved_at
 
 

@@ -1,13 +1,26 @@
 import type {
-  AccountSummary, Bet, EvalSummary, Forecast, GroupedItem, Holding, Market, Position, Review,
+  AccountSummary, AuditEntry, Bet, EvalSummary, Forecast, GroupedItem, Holding, Market, Position,
+  Review,
 } from './types'
 
 // Empty base => relative URLs proxied by Vite to the backend in dev.
 const BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+// Optional bearer token for an API_TOKENS-gated backend (internal team auth).
+const TOKEN = import.meta.env.VITE_API_TOKEN ?? ''
+
+// SSE stream URL for a live forecast (EventSource can't set headers → token via query).
+export function forecastStreamUrl(marketId: string): string {
+  const qs = new URLSearchParams({ market_id: marketId })
+  if (TOKEN) qs.set('token', TOKEN)
+  return `${BASE}/api/forecasts/stream?${qs.toString()}`
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}),
+    },
     ...init,
   })
   if (!res.ok) {
@@ -37,6 +50,7 @@ export const api = {
   holdings: () => req<Holding[]>('/api/holdings'),
   review: (id: string) => req<Review>(`/api/forecasts/${id}/review`, { method: 'POST' }),
   evalSummary: () => req<EvalSummary>('/api/eval/summary'),
+  audit: () => req<AuditEntry[]>('/api/audit'),
   poll: () => req<Record<string, number>>('/api/poll', { method: 'POST' }),
   devResolve: (market_id: string, outcome: number) =>
     req<unknown>('/api/dev/resolve', { method: 'POST', body: JSON.stringify({ market_id, outcome }) }),

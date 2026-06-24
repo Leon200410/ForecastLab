@@ -8,10 +8,20 @@ for call-site compatibility (DeepSeek/Anthropic ignore them beyond the cache key
 from typing import Optional
 
 import httpx
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random_exponential
 
 from ..config import settings
 from ..lib import cache
 from ..lib.cost_tracker import tracker
+
+
+def _is_transient(e: BaseException) -> bool:
+    """Retry only on transient failures: network/timeout, rate-limit, server errors."""
+    if isinstance(e, httpx.TransportError):  # timeouts, connection resets, DNS, etc.
+        return True
+    if isinstance(e, httpx.HTTPStatusError):
+        return e.response.status_code in (429, 500, 502, 503, 504)
+    return False
 
 
 class AnthropicLLM:
@@ -19,7 +29,9 @@ class AnthropicLLM:
 
     def __init__(self) -> None:
         import anthropic  # lazy: only imported when actually used
-        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        # SDK has built-in exponential backoff on 429/5xx/connection errors.
+        self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key,
+                                            max_retries=settings.llm_max_retries)
 
     def complete(self, prompt: str, *, system: Optional[str] = None, model: Optional[str] = None,
                  temperature: float = 0.7, max_tokens: int = 1024,
@@ -37,7 +49,7 @@ class AnthropicLLM:
         msg = self._client.messages.create(**kwargs)
         text = "".join(getattr(b, "text", "") for b in msg.content)
         try:
-            tracker.record(model, msg.usage.input_tokens, msg.usage.output_tokens)
+            tracker.record(model, msg.usage.input_tokens, msg.usage.output_tokens, kind=purpose)
         except Exception:
             pass
         cache.set_cached(text, *ck)
@@ -67,7 +79,11 @@ class DeepSeekLLM:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        try:
+
+        @retry(reraise=True, retry=retry_if_exception(_is_transient),
+               stop=stop_after_attempt(settings.llm_max_retries + 1),
+               wait=wait_random_exponential(multiplier=1, max=20))
+        def _do() -> dict:
             r = httpx.post(
                 f"{self.base_url}/chat/completions", timeout=120,
                 headers={"Authorization": f"Bearer {self.api_key}",
@@ -77,11 +93,17 @@ class DeepSeekLLM:
                       "chat_template_kwargs": {"thinking": settings.deepseek_thinking}},
             )
             r.raise_for_status()
-            data = r.json()
-            text = data["choices"][0]["message"]["content"] or ""
+            return r.json()
+
+        try:
+            data = _do()
+            msg = data["choices"][0]["message"]
+            # reasoning models (e.g. deepseek-v4-flash) can spend the budget on
+            # reasoning_content and leave content empty — fall back so we still get text.
+            text = msg.get("content") or msg.get("reasoning_content") or ""
             usage = data.get("usage", {})
             tracker.record(self.model, usage.get("prompt_tokens", 0),
-                           usage.get("completion_tokens", 0))
+                           usage.get("completion_tokens", 0), kind=purpose)
         except (httpx.HTTPError, KeyError, IndexError, ValueError) as e:
             raise RuntimeError(f"DeepSeek call failed: {e}")
         cache.set_cached(text, *ck)

@@ -7,13 +7,18 @@ Backed by DeepSeek (OpenAI-compatible) via langchain-openai.
 """
 import httpx
 from langchain.agents import create_agent
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.errors import GraphRecursionError
 
 from ..config import settings
+from ..lib import cache
 from ..lib.cost_tracker import tracker
 from ..lib.util import beijing_date, today_str
+from ..providers.llm import get_llm
 from ..providers.search import get_search
+from .prompts import DEFAULT_PERSONA, PERSONAS, SYSTEM_TMPL  # noqa: F401 (re-exported)
 
 _COINGECKO = "https://api.coingecko.com/api/v3"
 _COIN_IDS = {"btc": "bitcoin", "bitcoin": "bitcoin", "eth": "ethereum", "ethereum": "ethereum",
@@ -57,25 +62,8 @@ def web_search(query: str) -> str:
     ) or "(无结果)"
 
 
-PERSONAS = {
-    "加密": "你是资深加密资产分析师,最看重当前现价相对盘子阈值的位置、24h 动量与宏观流动性。"
-            "**必须先用 get_crypto_price 获取实时币价**,绝不依赖文章里可能过时的价格。",
-    "选举": "你是选举分析师,看重民调、历史基础率、在任优势与制度因素。",
-    "政治": "你是政治分析师,看重各方动机、历史先例与近期事件。",
-    "体育": "你是体育赛事分析师,看重球队实力、近期状态、赛程与伤停;比分/晋级类盘子用最新数据。",
-    "地缘政治": "你是地缘政治分析师,看重各方动机、历史升级/降级先例与最新信号。",
-    "经济": "你是宏观经济分析师,看重数据发布、央行政策与市场定价;商品类盘子关注现价与库存。",
-    "科技": "你是科技行业分析师,看重产品路线、发布节奏与竞争格局。",
-}
-DEFAULT_PERSONA = "你是严谨的超级预测者(superforecaster)。"
 TOOLS_BY_CAT = {"加密": [get_crypto_price, web_search]}
 DEFAULT_TOOLS = [web_search]
-
-SYSTEM_TMPL = """{persona}
-今天是 {today}(北京时间)。你只做分析,不做下注建议。
-先算从今天到截止日还剩多久;按需调用工具拿**实时/最新**数据(现价、最新新闻),不要被过时证据误导,也不要凭空想象远期波动。
-分析后**只输出一个 JSON**(不要任何前后缀、不要代码块):
-{{"probability": 0.xx, "confidence": "low|med|high", "rationale": "...", "key_factors": ["...", "..."]}}"""
 
 
 def _llm(temperature: float) -> ChatOpenAI:
@@ -83,7 +71,27 @@ def _llm(temperature: float) -> ChatOpenAI:
         raise RuntimeError("LangChain 分类 agent 需要 DeepSeek;请在 .env 设 DEEPSEEK_API_KEY。")
     return ChatOpenAI(model=settings.deepseek_model, base_url=settings.deepseek_base_url,
                       api_key=settings.deepseek_api_key, temperature=temperature,
-                      max_tokens=3000, timeout=120)
+                      max_tokens=3000, timeout=120, max_retries=settings.llm_max_retries)
+
+
+class _BudgetGuard(BaseCallbackHandler):
+    """Record token usage and enforce MAX_SPEND *between* agent LLM steps, so a
+    single multi-tool agent run can't blow past the cap before the next check."""
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    def on_llm_end(self, response, **kwargs) -> None:
+        try:
+            for gens in response.generations:
+                for g in gens:
+                    um = getattr(getattr(g, "message", None), "usage_metadata", None)
+                    if um:
+                        tracker.record(self.model, um.get("input_tokens", 0),
+                                       um.get("output_tokens", 0), kind="agent")
+        except Exception:
+            pass
+        tracker.check()  # raises BudgetExceeded mid-run once the cap is hit
 
 
 def run_category_agent(market: dict, evidence_bullets: str, lessons: str,
@@ -101,12 +109,29 @@ def run_category_agent(market: dict, evidence_bullets: str, lessons: str,
         f"已检索证据(可能过时,请看日期):\n{evidence_bullets}\n"
         f"过往复盘教训:\n{lessons}"
     )
+    # cache the whole agent run on its inputs (system carries today's date, so the
+    # cache turns over daily); same-day re-forecasts / ensemble reruns are then free
+    # and reproducible — closes the gap where the LangChain path bypassed cache.py.
+    ck = ("agent", settings.deepseek_model, round(temperature, 3), system, human)
+    hit = cache.get_cached(*ck)
+    if hit is not None:
+        return hit, category
+
     agent = create_agent(_llm(temperature), tools=tools, system_prompt=system)
-    res = agent.invoke({"messages": [{"role": "user", "content": human}]})
-    messages = res.get("messages", [])
-    for m in messages:  # keep MAX_SPEND tracking working through LangChain
-        um = getattr(m, "usage_metadata", None)
-        if um:
-            tracker.record(settings.deepseek_model, um.get("input_tokens", 0), um.get("output_tokens", 0))
-    final = messages[-1].content if messages else ""
-    return (final if isinstance(final, str) else str(final)), category
+    try:
+        res = agent.invoke(
+            {"messages": [{"role": "user", "content": human}]},
+            config={"callbacks": [_BudgetGuard(settings.deepseek_model)],
+                    "recursion_limit": settings.agent_recursion_limit},
+        )
+        messages = res.get("messages", [])
+        final = messages[-1].content if messages else ""
+        final = final if isinstance(final, str) else str(final)
+    except GraphRecursionError:
+        # the tool-using agent over-looped without converging (common on data-heavy
+        # questions). Fall back to ONE direct analysis call — no tools, no loop, so it
+        # always returns. The gathered evidence is already in `human`, so we keep context.
+        final = get_llm().complete(human, system=system, temperature=temperature,
+                                   max_tokens=2000, purpose="agent_fallback")
+    cache.set_cached(final, *ck)
+    return final, category

@@ -53,11 +53,13 @@ export interface Forecast {
   id: string
   market_id: string
   agent_prob: number
+  agent_prob_calibrated?: number | null
   market_prob_at_analysis: number
   confidence: Confidence
   rationale: string
   key_factors: string[]
   runs: ForecastRun[]
+  prompt_version?: string
   retrieved_lessons: string[]
   evidence: Evidence[]
   created_at: string
@@ -166,6 +168,13 @@ export interface EventGroup {
 
 export type GroupedItem = { kind: 'single'; market: Market } | EventGroup
 
+export interface AuditEntry {
+  t: string
+  user: string
+  action: string
+  target: string
+}
+
 export interface EvalSummary {
   forecasts: {
     n: number
@@ -175,10 +184,18 @@ export interface EvalSummary {
     accuracy?: number
     log_loss?: number
     calibration?: CalibrationBucket[]
+    agent_brier_calibrated?: number
+    n_calibrated?: number
+    by_version?: Record<string, { n: number; agent_brier: number; market_brier: number }>
   }
+  points?: { a: number; m: number; o: 0 | 1 }[]
   portfolio: AccountSummary
   kb_size: number
-  cost: { total_usd: number; calls: number; max_spend_usd: number }
+  cost: {
+    total_usd: number; today_usd?: number; calls: number; max_spend_usd: number
+    day?: string; by_kind?: Record<string, number>
+  }
+  cache?: { hits: number; misses: number; hit_rate: number }
   llm_mode: string
   data_source: string
 }

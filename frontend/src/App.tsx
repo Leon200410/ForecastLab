@@ -1,19 +1,54 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import gsap from 'gsap'
+import { useGSAP } from '@gsap/react'
 import { api } from './api'
 import { useAsync } from './lib'
 import MarketsPage from './pages/MarketsPage'
 import PositionsPage from './pages/PositionsPage'
 import PortfolioPage from './pages/PortfolioPage'
 import EvalPage from './pages/EvalPage'
+import AuditPage from './pages/AuditPage'
 
-type Tab = 'markets' | 'positions' | 'portfolio' | 'eval'
+gsap.registerPlugin(useGSAP)
+
+type Tab = 'markets' | 'positions' | 'portfolio' | 'eval' | 'audit'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('markets')
   const { data: h } = useAsync(() => api.health(), [])
+  const appRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<HTMLElement>(null)
+
+  // mount: header + tabs ease in (skipped under prefers-reduced-motion)
+  useGSAP(() => {
+    const mm = gsap.matchMedia()
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      gsap.from('header.top', { y: -14, opacity: 0, duration: 0.45, ease: 'power3.out' })
+      gsap.from('nav.tabs button', { y: -6, opacity: 0, stagger: 0.05, duration: 0.3,
+        delay: 0.1, ease: 'power2.out' })
+    })
+  }, { scope: appRef })
+
+  // health badges pop in once the /health call resolves
+  useGSAP(() => {
+    if (!h) return
+    const mm = gsap.matchMedia()
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      gsap.from('header.top .badge', { opacity: 0, scale: 0.85, stagger: 0.06,
+        duration: 0.3, ease: 'back.out(1.7)' })
+    })
+  }, { dependencies: [!!h], scope: appRef })
+
+  // smooth page transition on every tab switch
+  useGSAP(() => {
+    const mm = gsap.matchMedia()
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      gsap.from(viewRef.current, { opacity: 0, y: 10, duration: 0.32, ease: 'power2.out' })
+    })
+  }, { dependencies: [tab], scope: viewRef })
 
   return (
-    <div className="app">
+    <div className="app" ref={appRef}>
       <header className="top">
         <h1><span className="tag">Forecast</span>Lab</h1>
         <span className="sub">事件预测 Agent · 选盘 → 分析 → 假性押注 → 揭晓 → 复盘进化</span>
@@ -29,12 +64,16 @@ export default function App() {
         <button className={tab === 'positions' ? 'active' : ''} onClick={() => setTab('positions')}>分析 / 押注</button>
         <button className={tab === 'portfolio' ? 'active' : ''} onClick={() => setTab('portfolio')}>虚拟组合</button>
         <button className={tab === 'eval' ? 'active' : ''} onClick={() => setTab('eval')}>战绩评估</button>
+        <button className={tab === 'audit' ? 'active' : ''} onClick={() => setTab('audit')}>审计</button>
       </nav>
 
-      {tab === 'markets' && <MarketsPage key="m" onAnalyzed={() => setTab('positions')} />}
-      {tab === 'positions' && <PositionsPage key="p" />}
-      {tab === 'portfolio' && <PortfolioPage key="pf" />}
-      {tab === 'eval' && <EvalPage key="e" />}
+      <main className="view" ref={viewRef}>
+        {tab === 'markets' && <MarketsPage key="m" onAnalyzed={() => setTab('positions')} />}
+        {tab === 'positions' && <PositionsPage key="p" />}
+        {tab === 'portfolio' && <PortfolioPage key="pf" />}
+        {tab === 'eval' && <EvalPage key="e" />}
+        {tab === 'audit' && <AuditPage key="a" />}
+      </main>
 
       <footer className="disc">
         仅供研究与分析,非投资建议。Agent 只做分析、不做下注决策;所有押注均为用户手输的虚拟纸面记录,不接支付,不构成任何真实交易。

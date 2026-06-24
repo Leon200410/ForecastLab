@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react'
-import { api } from '../api'
+import { api, forecastStreamUrl } from '../api'
 import { pct, useAsync } from '../lib'
+import { useToast } from '../components/Toast'
+import { ErrorNote, Loading } from '../components/ui'
 import type { EventGroup, GroupedItem } from '../types'
 
 const catOf = (i: GroupedItem) => (i.kind === 'event' ? i.category : i.market.category) || '其他'
 
 export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) {
   const { data, loading, error, reload } = useAsync(() => api.marketsGrouped(), [])
+  const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
-  const [msg, setMsg] = useState<string | null>(null)
+  const [progress, setProgress] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [category, setCategory] = useState<string | null>(null)
 
@@ -28,29 +31,51 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
     })
   }
 
-  async function analyze(marketId: string, label: string) {
+  function analyze(marketId: string, label: string) {
     setBusy(marketId)
-    setMsg(null)
-    try {
-      const fc = await api.forecast(marketId)
-      setMsg(`已分析「${label}」(Agent ${Math.round(fc.agent_prob * 100)}%),见「分析 / 押注」。`)
+    setProgress('开始分析…')
+    const es = new EventSource(forecastStreamUrl(marketId))
+    let finished = false
+    const finish = () => { finished = true; es.close(); setBusy(null); setProgress(null) }
+
+    es.addEventListener('evidence', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setProgress(`已检索 ${d.count} 条证据、${d.lessons} 条历史复盘,集成分析中…`)
+    })
+    es.addEventListener('run', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setProgress(`集成成员 #${d.i + 1}:${Math.round(d.probability * 100)}%(${d.confidence})`)
+    })
+    es.addEventListener('aggregate', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      setProgress(`聚合完成 ${Math.round(d.agent_prob * 100)}%,写入中…`)
+    })
+    es.addEventListener('done', (e) => {
+      const fc = JSON.parse((e as MessageEvent).data)
+      finish()
+      toast(`已分析「${label}」(Agent ${Math.round(fc.agent_prob * 100)}%),见「分析 / 押注」。`, 'success')
       onAnalyzed()
-    } catch (e) {
-      setMsg('分析失败:' + (e as Error).message)
-    } finally {
-      setBusy(null)
+    })
+    es.addEventListener('failed', (e) => {
+      const d = JSON.parse((e as MessageEvent).data)
+      finish()
+      toast(d.message || '分析失败', 'error')
+    })
+    es.onerror = () => {
+      if (finished) return
+      finish()
+      toast('分析连接中断,请重试。', 'error')
     }
   }
 
   async function ingest() {
     setBusy('ingest')
-    setMsg(null)
     try {
       const r = await api.ingest()
-      setMsg(`已拉取 ${r.ingested} 个开放盘子(来源:${r.source})。`)
+      toast(`已拉取 ${r.ingested} 个开放盘子(来源:${r.source})。`, 'success')
       reload()
     } catch (e) {
-      setMsg('拉取失败:' + (e as Error).message)
+      toast('拉取失败:' + (e as Error).message, 'error')
     } finally {
       setBusy(null)
     }
@@ -65,9 +90,13 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
         </button>
       </div>
 
-      {msg && <div className="notice" style={{ marginBottom: 12 }}>{msg}</div>}
-      {loading && <div className="empty">加载中…</div>}
-      {error && <div className="error">{error}</div>}
+      {progress && (
+        <div className="notice" style={{ marginBottom: 12 }}>
+          <span className="spinner" style={{ marginRight: 8 }} />{progress}
+        </div>
+      )}
+      {loading && <Loading />}
+      {error && <ErrorNote error={error} onRetry={reload} />}
       {data && data.length === 0 && <div className="empty">暂无开放盘子,点「拉取最新盘子」。</div>}
 
       {data && data.length > 0 && (

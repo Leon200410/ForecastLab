@@ -4,11 +4,19 @@ uvicorn[standard]
 httpx
 pydantic>=2
 python-dotenv
-pytest
+tenacity                    # retry + exponential backoff on transient LLM/network errors
 
-# Per-category agents (DeepSeek via OpenAI-compatible) + live-data tools
-langchain
-langchain-openai
+# Per-category agents (DeepSeek via OpenAI-compatible) + live-data tools.
+# Pinned: the LangChain 1.x line moves fast and create_agent's API/behaviour can
+# shift between minors — pin so a fresh install can't break the agent overnight.
+# (For full reproducibility generate a lockfile: pip freeze > requirements.lock.)
+langchain==1.3.11
+langchain-openai==1.3.3
+langgraph==1.2.6            # create_agent lives in langchain.agents but runs on langgraph
+
+# RAG embeddings — default EMBEDDING_PROVIDER=fastembed (ONNX, no torch; multilingual)
+fastembed==0.8.0
+numpy==2.5.0               # vectorized KB similarity search (app/kb/store.py)
 
 # Optional — quality upgrades (not required; DeepSeek uses httpx above)
 #   anthropic               # only if LLM_PROVIDER=anthropic

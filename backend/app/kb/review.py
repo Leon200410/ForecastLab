@@ -14,8 +14,24 @@ from ..providers.llm import get_llm
 from . import store
 
 
-def retrieve_lessons(question: str, k: int = 3) -> list[str]:
-    return [p.get("lesson", "") for p in store.search(question, k) if p.get("lesson")]
+def retrieve_lessons(question: str, k: int = 3, *, category: Optional[str] = None,
+                     exclude_market_id: Optional[str] = None,
+                     min_score: Optional[float] = None) -> list[str]:
+    """Past-review lessons most similar to `question`, gated by a relevance floor
+    and optionally restricted to the same category / excluding the market's own
+    prior reviews (avoids feeding a market its own past lesson back to itself)."""
+    floor = settings.kb_min_score if min_score is None else min_score
+    out: list[str] = []
+    for p in store.search(question, k=k * 4, min_score=floor):
+        if exclude_market_id and p.get("market_id") == exclude_market_id:
+            continue
+        if category and p.get("category") and p.get("category") != category:
+            continue
+        if p.get("lesson"):
+            out.append(p["lesson"])
+        if len(out) >= k:
+            break
+    return out
 
 
 def generate_review(forecast_id: str) -> Review:
@@ -68,6 +84,10 @@ def generate_review(forecast_id: str) -> Review:
     fc.reviewed = True
     db.put("forecasts", fc.model_dump())
 
-    store.add(f"{review.question}\n{review.lesson}",
-              {"lesson": review.lesson, "question": review.question, "forecast_id": forecast_id})
+    # embed the question only — the retrieval query is also a question, so this
+    # keeps key/query symmetric (the lesson text lives in the payload, not the vector).
+    store.add(review.question,
+              {"lesson": review.lesson, "question": review.question, "forecast_id": forecast_id,
+               "market_id": fc.market_id, "category": market.get("category"),
+               "created_at": review.created_at})
     return review
