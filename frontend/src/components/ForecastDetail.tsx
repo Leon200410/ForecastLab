@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api } from '../api'
-import { fmtDateTime, fmtOdds, pct, signMoney, useAsync, winProfit } from '../lib'
+import { fmtDateTime, fmtOdds, pct, signMoney, useAsync, verdict, winProfit } from '../lib'
 import { Loading } from './ui'
 
 export default function ForecastDetail({ id, url, onClose, onChanged }: {
@@ -27,6 +27,16 @@ export default function ForecastDetail({ id, url, onClose, onChanged }: {
               </h3>
               <button className="btn ghost sm" onClick={onClose}>关闭</button>
             </div>
+            {(() => {
+              const v = verdict(fc.agent_prob)
+              return (
+                <div className={`verdict ${v.cls}`}>
+                  <span className="verdict-k">Agent 判断</span>
+                  <span className="verdict-v">{v.side}<em>{v.word}</em></span>
+                  <span className="verdict-meta">概率 {pct(fc.agent_prob)}</span>
+                </div>
+              )
+            })()}
             <div className="row" style={{ gap: 16, margin: '8px 0 14px', flexWrap: 'wrap' }}>
               <span>Agent <b>{pct(fc.agent_prob)}</b></span>
               {fc.agent_prob_calibrated != null && (

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { api, forecastStreamUrl } from '../api'
-import { pct, useAsync } from '../lib'
+import { pct, useAsync, verdict } from '../lib'
 import { useToast } from '../components/Toast'
 import { ErrorNote, Loading } from '../components/ui'
 import type { EventGroup, GroupedItem } from '../types'
@@ -53,7 +53,8 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
     es.addEventListener('done', (e) => {
       const fc = JSON.parse((e as MessageEvent).data)
       finish()
-      toast(`已分析「${label}」(Agent ${Math.round(fc.agent_prob * 100)}%),见「分析 / 押注」。`, 'success')
+      const v = verdict(fc.agent_prob)
+      toast(`已分析「${label}」:判断 ${v.side}(${v.word},${Math.round(fc.agent_prob * 100)}%),见「分析 / 押注」。`, 'success')
       onAnalyzed()
     })
     es.addEventListener('failed', (e) => {

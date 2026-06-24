@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api } from '../api'
-import { fmtDate, fmtDateTime, fmtOdds, pct, pnlClass, signMoney, useAsync, winProfit } from '../lib'
+import { fmtDate, fmtDateTime, fmtOdds, pct, pnlClass, signMoney, useAsync, verdict, winProfit } from '../lib'
 import { useToast } from '../components/Toast'
 import { ErrorNote, Loading } from '../components/ui'
 import type { Position } from '../types'
@@ -133,11 +133,13 @@ function Row({ p, onBet, onDetail, onChanged }: {
 }
 
 function ProbBars({ agent, market }: { agent: number; market: number }) {
+  const v = verdict(agent)
   return (
-    <div style={{ minWidth: 150 }}>
+    <div style={{ minWidth: 172 }}>
       <div className="row" style={{ gap: 8 }} title="Agent 概率">
         <span className="mono" style={{ width: 34 }}>{pct(agent)}</span>
         <div className="bar"><span style={{ width: `${agent * 100}%` }} /></div>
+        <span className={`vtag ${v.cls}`} title={`Agent 判断:${v.side}`}>{v.tag}</span>
       </div>
       <div className="row" style={{ gap: 8, marginTop: 4 }} title="分析时市场价">
         <span className="mono muted" style={{ width: 34 }}>{pct(market)}</span>

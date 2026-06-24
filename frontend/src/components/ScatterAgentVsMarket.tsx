@@ -11,18 +11,18 @@ export default function ScatterAgentVsMarket({ points }: {
 
   return (
     <svg viewBox={`0 0 ${S} ${S}`} width="100%" style={{ maxWidth: 280 }}>
-      <rect x={pad} y={pad} width={S - 2 * pad} height={S - 2 * pad} fill="none" stroke="#2a3340" />
-      <line x1={x(0)} y1={y(0)} x2={x(1)} y2={y(1)} stroke="#8b98a8" strokeDasharray="4 4" />
+      <rect x={pad} y={pad} width={S - 2 * pad} height={S - 2 * pad} fill="none" stroke="var(--border-2)" />
+      <line x1={x(0)} y1={y(0)} x2={x(1)} y2={y(1)} stroke="var(--muted)" strokeDasharray="4 4" />
       {points.map((p, i) => {
         const correct = (p.a >= 0.5 ? 1 : 0) === p.o
         return (
           <circle key={i} cx={x(p.m)} cy={y(p.a)} r={3.5}
-            fill={correct ? '#3fb950' : '#f85149'} fillOpacity={0.75}
-            stroke="#0d1117" strokeWidth={0.5} />
+            fill={correct ? 'var(--mint)' : 'var(--coral)'} fillOpacity={0.8}
+            stroke="var(--bg)" strokeWidth={0.5} />
         )
       })}
-      <text x={x(0.5)} y={S - 6} fill="#8b98a8" fontSize="9" textAnchor="middle">市场概率</text>
-      <text x={10} y={y(0.5)} fill="#8b98a8" fontSize="9" textAnchor="middle"
+      <text x={x(0.5)} y={S - 6} fill="var(--muted)" fontSize="9" textAnchor="middle">市场概率</text>
+      <text x={10} y={y(0.5)} fill="var(--muted)" fontSize="9" textAnchor="middle"
         transform={`rotate(-90 10 ${y(0.5)})`}>Agent 概率</text>
     </svg>
   )

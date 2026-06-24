@@ -27,6 +27,17 @@ export const signMoney = (x?: number | null) =>
 export const round2 = (x: number) => Math.round(x * 100) / 100
 export const pnlClass = (x?: number | null) => (x == null ? '' : x > 0 ? 'pos' : x < 0 ? 'neg' : '')
 
+// Agent's YES/NO call, derived from its probability (P(YES) for the binary
+// market). A ±5% band around 0.5 is flagged as a toss-up rather than forced
+// onto a side. (Scoring still uses a hard 0.5 split — see ScatterAgentVsMarket.)
+export const verdict = (prob?: number | null) => {
+  if (prob == null) return { side: '—', word: '', tag: '—', cls: '' }
+  if (prob >= 0.45 && prob <= 0.55) return { side: '中性', word: '接近五五开', tag: '≈', cls: 'even' }
+  return prob < 0.5
+    ? { side: 'NO', word: '不会', tag: 'NO', cls: 'no' }
+    : { side: 'YES', word: '会', tag: 'YES', cls: 'yes' }
+}
+
 // market timing (Polymarket is UTC -> we display Beijing time, UTC+8) + odds / payout
 const _bjDate = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
