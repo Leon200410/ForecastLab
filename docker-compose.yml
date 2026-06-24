@@ -1,0 +1,28 @@
+# ForecastLab — backend (FastAPI) + frontend (nginx static + /api proxy).
+# Copy .env.example -> .env and set DEEPSEEK_API_KEY to use DeepSeek (else mock).
+#   docker compose up --build
+#   open http://localhost:8080
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AUTO_INGEST: "1"
+    volumes:
+      - fl_data:/app/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+volumes:
+  fl_data:

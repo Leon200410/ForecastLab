@@ -1,0 +1,18 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local data / cache / secrets
+backend/data/*.db
+backend/data/cache/
+backend/data/cost_log.jsonl
+.env
+
+# Node / build
+frontend/node_modules/
+frontend/dist/
+
+# TS build info
+frontend/*.tsbuildinfo

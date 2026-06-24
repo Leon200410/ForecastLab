@@ -1,0 +1,17 @@
+# Core (required) — installs clean on Python 3.11–3.14, no heavy build deps
+fastapi
+uvicorn[standard]
+httpx
+pydantic>=2
+python-dotenv
+pytest
+
+# Per-category agents (DeepSeek via OpenAI-compatible) + live-data tools
+langchain
+langchain-openai
+
+# Optional — quality upgrades (not required; DeepSeek uses httpx above)
+#   anthropic               # only if LLM_PROVIDER=anthropic
+#   sentence-transformers   # better embeddings (EMBEDDING_PROVIDER=sentence-transformers)
+#   chromadb                # swappable vector store (default: built-in local store)
+#   trafilatura             # better article extraction (default: simple HTML stripper)
