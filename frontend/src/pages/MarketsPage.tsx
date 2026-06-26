@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, forecastStreamUrl } from '../api'
 import { pct, useAsync, verdict } from '../lib'
 import { useToast } from '../components/Toast'
@@ -7,13 +7,18 @@ import type { EventGroup, GroupedItem } from '../types'
 
 const catOf = (i: GroupedItem) => (i.kind === 'event' ? i.category : i.market.category) || '其他'
 
-export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) {
+export default function MarketsPage() {
   const { data, loading, error, reload } = useAsync(() => api.marketsGrouped(), [])
   const toast = useToast()
-  const [busy, setBusy] = useState<string | null>(null)
-  const [progress, setProgress] = useState<string | null>(null)
+  // each market analyzes independently → track per-market progress (presence = running)
+  const [inflight, setInflight] = useState<Record<string, { label: string; msg: string }>>({})
+  const [busyIngest, setBusyIngest] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [category, setCategory] = useState<string | null>(null)
+  const esRef = useRef<Map<string, EventSource>>(new Map())
+
+  // close any still-open streams when leaving the page
+  useEffect(() => () => { esRef.current.forEach((es) => es.close()); esRef.current.clear() }, [])
 
   const cats = useMemo(() => {
     const counts = new Map<string, number>()
@@ -22,6 +27,7 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
   }, [data])
 
   const shown = (data ?? []).filter((i) => !category || catOf(i) === category)
+  const running = new Set(Object.keys(inflight))
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -32,45 +38,52 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
   }
 
   function analyze(marketId: string, label: string) {
-    setBusy(marketId)
-    setProgress('开始分析…')
+    if (esRef.current.has(marketId)) return // already running
+    const setMsg = (msg: string) => setInflight((p) => ({ ...p, [marketId]: { label, msg } }))
+    setMsg('开始分析…')
     const es = new EventSource(forecastStreamUrl(marketId))
+    esRef.current.set(marketId, es)
     let finished = false
-    const finish = () => { finished = true; es.close(); setBusy(null); setProgress(null) }
+    const finish = () => {
+      if (finished) return
+      finished = true
+      es.close()
+      esRef.current.delete(marketId)
+      setInflight((p) => { const n = { ...p }; delete n[marketId]; return n })
+    }
 
     es.addEventListener('evidence', (e) => {
       const d = JSON.parse((e as MessageEvent).data)
-      setProgress(`已检索 ${d.count} 条证据、${d.lessons} 条历史复盘,集成分析中…`)
+      setMsg(`已检索 ${d.count} 条证据、${d.lessons} 条历史复盘,集成分析中…`)
     })
     es.addEventListener('run', (e) => {
       const d = JSON.parse((e as MessageEvent).data)
-      setProgress(`集成成员 #${d.i + 1}:${Math.round(d.probability * 100)}%(${d.confidence})`)
+      setMsg(`集成成员 #${d.i + 1}:${Math.round(d.probability * 100)}%(${d.confidence})`)
     })
     es.addEventListener('aggregate', (e) => {
       const d = JSON.parse((e as MessageEvent).data)
-      setProgress(`聚合完成 ${Math.round(d.agent_prob * 100)}%,写入中…`)
+      setMsg(`聚合完成 ${Math.round(d.agent_prob * 100)}%,写入中…`)
     })
     es.addEventListener('done', (e) => {
       const fc = JSON.parse((e as MessageEvent).data)
       finish()
       const v = verdict(fc.agent_prob)
       toast(`已分析「${label}」:判断 ${v.side}(${v.word},${Math.round(fc.agent_prob * 100)}%),见「分析 / 押注」。`, 'success')
-      onAnalyzed()
     })
     es.addEventListener('failed', (e) => {
       const d = JSON.parse((e as MessageEvent).data)
       finish()
-      toast(d.message || '分析失败', 'error')
+      toast(`「${label}」分析失败:${d.message || '未知错误'}`, 'error')
     })
     es.onerror = () => {
       if (finished) return
       finish()
-      toast('分析连接中断,请重试。', 'error')
+      toast(`「${label}」分析连接中断,请重试。`, 'error')
     }
   }
 
   async function ingest() {
-    setBusy('ingest')
+    setBusyIngest(true)
     try {
       const r = await api.ingest()
       toast(`已拉取 ${r.ingested} 个开放盘子(来源:${r.source})。`, 'success')
@@ -78,22 +91,30 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
     } catch (e) {
       toast('拉取失败:' + (e as Error).message, 'error')
     } finally {
-      setBusy(null)
+      setBusyIngest(false)
     }
   }
+
+  const runningList = Object.entries(inflight)
 
   return (
     <div>
       <div className="row spread" style={{ marginBottom: 12 }}>
         <div className="section-title" style={{ margin: 0 }}>开放市场 · Polymarket(已滤掉已揭晓盘)</div>
-        <button className="btn ghost sm" onClick={ingest} disabled={busy === 'ingest'}>
-          {busy === 'ingest' ? '拉取中…' : '拉取最新盘子'}
+        <button className="btn ghost sm" onClick={ingest} disabled={busyIngest}>
+          {busyIngest ? '拉取中…' : '拉取最新盘子'}
         </button>
       </div>
 
-      {progress && (
-        <div className="notice" style={{ marginBottom: 12 }}>
-          <span className="spinner" style={{ marginRight: 8 }} />{progress}
+      {runningList.length > 0 && (
+        <div className="notice" style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="muted" style={{ fontSize: 12, letterSpacing: '.04em' }}>{runningList.length} 个盘子分析中(可同时进行)</div>
+          {runningList.map(([id, { label, msg }]) => (
+            <div key={id} className="row" style={{ gap: 8 }}>
+              <span className="spinner" />
+              <span style={{ fontSize: 12.5 }}><b>{label}</b> · {msg}</span>
+            </div>
+          ))}
         </div>
       )}
       {loading && <Loading />}
@@ -131,15 +152,15 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
                       <td className="muted">{item.market.category || '—'}</td>
                       <td className="right mono">{pct(item.market.current_prob)}</td>
                       <td className="right">
-                        <button className="btn sm" disabled={busy === item.market.id}
+                        <button className="btn sm" disabled={running.has(item.market.id)}
                           onClick={() => analyze(item.market.id, item.market.question)}>
-                          {busy === item.market.id ? '分析中…' : '分析'}
+                          {running.has(item.market.id) ? '分析中…' : '分析'}
                         </button>
                       </td>
                     </tr>
                   ) : (
                     <EventRows key={item.event_id} ev={item} open={expanded.has(item.event_id)}
-                      onToggle={() => toggle(item.event_id)} busy={busy} onAnalyze={analyze} />
+                      onToggle={() => toggle(item.event_id)} running={running} onAnalyze={analyze} />
                   ),
                 )}
               </tbody>
@@ -151,11 +172,11 @@ export default function MarketsPage({ onAnalyzed }: { onAnalyzed: () => void }) 
   )
 }
 
-function EventRows({ ev, open, onToggle, busy, onAnalyze }: {
+function EventRows({ ev, open, onToggle, running, onAnalyze }: {
   ev: EventGroup
   open: boolean
   onToggle: () => void
-  busy: string | null
+  running: Set<string>
   onAnalyze: (marketId: string, label: string) => void
 }) {
   return (
@@ -178,9 +199,9 @@ function EventRows({ ev, open, onToggle, busy, onAnalyze }: {
           <td></td>
           <td className="right mono">{pct(o.prob)}</td>
           <td className="right">
-            <button className="btn sm" disabled={busy === o.market_id}
+            <button className="btn sm" disabled={running.has(o.market_id)}
               onClick={() => onAnalyze(o.market_id, `${ev.event_title} — ${o.name}`)}>
-              {busy === o.market_id ? '分析中…' : '分析'}
+              {running.has(o.market_id) ? '分析中…' : '分析'}
             </button>
           </td>
         </tr>

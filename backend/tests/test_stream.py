@@ -25,7 +25,7 @@ def test_stream_emits_stage_events_then_done(monkeypatch):
     monkeypatch.setattr(settings, "api_tokens", {})
     _seed_open()
 
-    def fake_run(market, on_event=None):
+    def fake_run(market, on_event=None, fresh=False):
         on_event("evidence", {"count": 3, "lessons": 1})
         on_event("run", {"i": 0, "probability": 0.6, "confidence": "med"})
         on_event("aggregate", {"agent_prob": 0.62, "confidence": "med"})
@@ -44,7 +44,7 @@ def test_stream_emits_failed_on_error(monkeypatch):
     monkeypatch.setattr(settings, "api_tokens", {})
     _seed_open()
 
-    def boom(market, on_event=None):
+    def boom(market, on_event=None, fresh=False):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(forecaster, "run_forecast", boom)

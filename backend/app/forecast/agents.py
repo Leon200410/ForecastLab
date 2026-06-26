@@ -17,7 +17,7 @@ from ..lib import cache
 from ..lib.cost_tracker import tracker
 from ..lib.util import beijing_date, today_str
 from ..providers.llm import get_llm
-from ..providers.search import get_search
+from ..providers.search import SearchUnavailable, get_search
 from .prompts import DEFAULT_PERSONA, PERSONAS, SYSTEM_TMPL  # noqa: F401 (re-exported)
 
 _COINGECKO = "https://api.coingecko.com/api/v3"
@@ -54,7 +54,12 @@ def web_search(query: str) -> str:
     """检索网络获取最新公开信息(新闻、数据)。返回若干条标题 + 摘要 + 链接。"""
     try:
         results = get_search().search(query, 4)
-    except Exception as e:  # search may be unconfigured / transient
+    except SearchUnavailable as e:
+        # search is DOWN (quota/auth/network), NOT "nothing exists" — say so plainly so the
+        # agent doesn't read a tool outage as evidence the event won't happen (→ false "NO").
+        return (f"检索服务暂时不可用({e})。这不代表相关信息不存在,"
+                "不能据此推断结果;证据不足时请保持不确定、降低置信。")
+    except Exception as e:  # search unconfigured, etc.
         return f"检索失败:{e}"
     return "\n".join(
         f"- {r.get('title', '')}: {(r.get('snippet') or '')[:200]} ({r.get('url', '')})"
@@ -95,8 +100,12 @@ class _BudgetGuard(BaseCallbackHandler):
 
 
 def run_category_agent(market: dict, evidence_bullets: str, lessons: str,
-                       *, temperature: float) -> tuple[str, str]:
-    """Run the domain agent once. Returns (final_text, category)."""
+                       *, temperature: float, use_cache: bool = True) -> tuple[str, str]:
+    """Run the domain agent once. Returns (final_text, category).
+
+    use_cache=False forces a fresh run (skips the cache *read*), so an explicit
+    re-analysis produces a new result instead of replaying the same-day cached
+    run. The fresh result is still written to cache for later non-fresh reads."""
     tracker.check()
     category = market.get("category") or "其他"
     persona = PERSONAS.get(category, DEFAULT_PERSONA)
@@ -113,7 +122,7 @@ def run_category_agent(market: dict, evidence_bullets: str, lessons: str,
     # cache turns over daily); same-day re-forecasts / ensemble reruns are then free
     # and reproducible — closes the gap where the LangChain path bypassed cache.py.
     ck = ("agent", settings.deepseek_model, round(temperature, 3), system, human)
-    hit = cache.get_cached(*ck)
+    hit = cache.get_cached(*ck) if use_cache else None
     if hit is not None:
         return hit, category
 

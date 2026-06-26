@@ -43,6 +43,18 @@ def _brier_mean(rows: list[dict], key: str) -> float:
     return round(sum(brier(r[key], r["outcome"]) for r in rows) / len(rows), 4)
 
 
+def _subset_summary(rows: list[dict]) -> dict:
+    """Compact scorecard for a group of resolved forecasts (the per-category breakdown)."""
+    n = len(rows)
+    return {
+        "n": n,
+        "accuracy": round(sum(accuracy(r["agent_prob"], r["outcome"]) for r in rows) / n, 4),
+        "market_accuracy": round(sum(accuracy(r["market_prob"], r["outcome"]) for r in rows) / n, 4),
+        "agent_brier": _brier_mean(rows, "agent_prob"),
+        "market_brier": _brier_mean(rows, "market_prob"),
+    }
+
+
 def summarize_forecasts(resolved: list[dict]) -> dict:
     """`resolved`: list of {agent_prob, market_prob, outcome, [agent_prob_cal],
     [prompt_version]}. Returns agent vs market, plus calibrated Brier and a
@@ -53,13 +65,27 @@ def summarize_forecasts(resolved: list[dict]) -> dict:
     ab = _brier_mean(resolved, "agent_prob")
     mb = _brier_mean(resolved, "market_prob")
     acc = sum(accuracy(r["agent_prob"], r["outcome"]) for r in resolved) / n
+    macc = sum(accuracy(r["market_prob"], r["outcome"]) for r in resolved) / n
     ll = sum(log_loss(r["agent_prob"], r["outcome"]) for r in resolved) / n
+    # hypothetical strategy: $100 on the analysis's pick, entered at the market
+    # price when the analysis was made (no future function) — does the agent's
+    # edge translate into paper P&L? (mirrors frontend lib.estBet)
+    est_pnls = []
+    for r in resolved:
+        e_side = "YES" if r["agent_prob"] >= 0.5 else "NO"
+        e_entry = side_price(e_side, r["market_prob"])
+        if 0.0 < e_entry < 1.0:
+            est_pnls.append(bet_pnl(e_side, 100.0, e_entry, r["outcome"]))
+    est_total = sum(est_pnls)
     out = {
         "n": n,
         "agent_brier": ab,
         "market_brier": mb,
         "beats_market": ab < mb,
         "accuracy": round(acc, 4),
+        "market_accuracy": round(macc, 4),
+        "est_pnl_100": round(est_total, 2),
+        "est_roi": round(est_total / (100.0 * len(est_pnls)), 4) if est_pnls else 0.0,
         "log_loss": round(ll, 4),
         "calibration": calibration([(r["agent_prob"], r["outcome"]) for r in resolved]),
     }
@@ -77,6 +103,16 @@ def summarize_forecasts(resolved: list[dict]) -> dict:
             v: {"n": len(rs), "agent_brier": _brier_mean(rs, "agent_prob"),
                 "market_brier": _brier_mean(rs, "market_prob")}
             for v, rs in sorted(versions.items())
+        }
+    # per-category breakdown — each category routes to its own domain agent, so this
+    # surfaces which agent is lagging (head-to-head vs the market baseline per category).
+    cats: dict[str, list[dict]] = {}
+    for r in resolved:
+        cats.setdefault(r.get("category") or "其他", []).append(r)
+    if cats:
+        out["by_category"] = {
+            c: _subset_summary(rs)
+            for c, rs in sorted(cats.items(), key=lambda kv: (-len(kv[1]), kv[0]))
         }
     return out
 

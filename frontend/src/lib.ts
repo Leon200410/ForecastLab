@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { Side } from './types'
 
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null)
@@ -61,3 +62,16 @@ export const winProfit = (stake?: number | null, p?: number | null) =>
   stake && p && p > 0 ? (stake * (1 - p)) / p : 0   // profit if the bet is correct
 export const winPayout = (stake?: number | null, p?: number | null) =>
   stake && p && p > 0 ? stake / p : 0               // total returned if correct
+
+// Hypothetical paper bet of EST_STAKE on the analysis's pick (hard 0.5 split),
+// entered at the market price when the analysis was made (no future function).
+// Mirrors backend metrics.bet_pnl — keep the two in sync.
+export const EST_STAKE = 100
+export function estBet(agentProb: number, marketProb: number, outcome: 0 | 1) {
+  const side: Side = agentProb >= 0.5 ? 'YES' : 'NO'
+  const entry = side === 'YES' ? marketProb : 1 - marketProb
+  const valid = entry > 0 && entry < 1
+  const hit = (side === 'YES' ? 1 : 0) === outcome
+  const pnl = !valid ? 0 : hit ? winProfit(EST_STAKE, entry) : -EST_STAKE
+  return { side, entry, valid, hit, pnl }
+}

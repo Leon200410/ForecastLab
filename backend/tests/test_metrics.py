@@ -65,6 +65,32 @@ def test_summarize_forecasts_beats_market():
     assert s["market_brier"] == pytest.approx(0.25)
     assert s["beats_market"] is True
     assert s["accuracy"] == pytest.approx(1.0)
+    # market at 0.5 predicts YES for both -> right on the outcome=1 row, wrong on outcome=0
+    assert s["market_accuracy"] == pytest.approx(0.5)
+    # $100 on each analysis pick at entry 0.5, both correct -> +100 each = +200, ROI 100%
+    assert s["est_pnl_100"] == pytest.approx(200.0)
+    assert s["est_roi"] == pytest.approx(1.0)
+
+
+def test_summarize_by_category():
+    # each category routes to its own agent → breakdown must group + score per category
+    resolved = [
+        {"agent_prob": 1.0, "market_prob": 0.5, "outcome": 1, "category": "加密"},
+        {"agent_prob": 0.0, "market_prob": 0.5, "outcome": 1, "category": "加密"},  # wrong call
+        {"agent_prob": 1.0, "market_prob": 0.5, "outcome": 1, "category": "体育"},
+    ]
+    bc = metrics.summarize_forecasts(resolved)["by_category"]
+    assert list(bc.keys()) == ["加密", "体育"]          # sorted by n desc (加密=2 before 体育=1)
+    assert bc["加密"]["n"] == 2
+    assert bc["加密"]["accuracy"] == pytest.approx(0.5)  # 1 of 2 correct
+    assert bc["体育"]["accuracy"] == pytest.approx(1.0)
+    assert bc["体育"]["market_accuracy"] == pytest.approx(1.0)  # market 0.5 → YES, outcome 1
+
+
+def test_summarize_category_defaults_to_other():
+    # forecasts without a category fall under 其他 (not dropped)
+    bc = metrics.summarize_forecasts([{"agent_prob": 0.6, "market_prob": 0.5, "outcome": 1}])["by_category"]
+    assert set(bc) == {"其他"} and bc["其他"]["n"] == 1
 
 
 def test_calibration_buckets():

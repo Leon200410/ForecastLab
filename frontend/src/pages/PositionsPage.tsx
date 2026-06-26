@@ -49,10 +49,14 @@ export default function PositionsPage() {
       )}
 
       {betFor && <BetForm position={betFor} onClose={() => setBetFor(null)} onDone={() => { setBetFor(null); reload() }} />}
-      {detailId && (
-        <ForecastDetail id={detailId} url={(data ?? []).find((p) => p.id === detailId)?.url}
-          onClose={() => setDetailId(null)} onChanged={reload} />
-      )}
+      {detailId && (() => {
+        const p = (data ?? []).find((x) => x.id === detailId)
+        if (!p) return null
+        return (
+          <ForecastDetail id={detailId} marketId={p.market_id} url={p.url}
+            onClose={() => setDetailId(null)} onChanged={reload} />
+        )
+      })()}
     </div>
   )
 }

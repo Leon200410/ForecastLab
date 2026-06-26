@@ -182,11 +182,17 @@ export interface EvalSummary {
     market_brier?: number
     beats_market?: boolean
     accuracy?: number
+    market_accuracy?: number
+    est_pnl_100?: number
+    est_roi?: number
     log_loss?: number
     calibration?: CalibrationBucket[]
     agent_brier_calibrated?: number
     n_calibrated?: number
     by_version?: Record<string, { n: number; agent_brier: number; market_brier: number }>
+    by_category?: Record<string, {
+      n: number; accuracy: number; market_accuracy: number; agent_brier: number; market_brier: number
+    }>
   }
   points?: { a: number; m: number; o: 0 | 1 }[]
   portfolio: AccountSummary

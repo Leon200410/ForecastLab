@@ -47,9 +47,10 @@ def _repair_json(raw: str) -> Optional[dict]:
         return None
 
 
-def _run_once(market: dict, ev_text: str, le_text: str, i: int) -> Optional[ForecastRun]:
+def _run_once(market: dict, ev_text: str, le_text: str, i: int,
+              fresh: bool = False) -> Optional[ForecastRun]:
     final, _cat = agents.run_category_agent(
-        market, ev_text, le_text, temperature=round(0.3 + 0.25 * i, 2))
+        market, ev_text, le_text, temperature=round(0.3 + 0.25 * i, 2), use_cache=not fresh)
     data = extract_json(final)
     if not data or "probability" not in data:
         data = _repair_json(final)
@@ -66,9 +67,11 @@ def _run_once(market: dict, ev_text: str, le_text: str, i: int) -> Optional[Fore
         return None
 
 
-def run_forecast(market: dict, on_event=None) -> Forecast:
+def run_forecast(market: dict, on_event=None, fresh: bool = False) -> Forecast:
     """on_event(kind, data): optional progress callback (evidence/run/aggregate)
-    for streaming. Called from worker threads too, so it must be thread-safe."""
+    for streaming. Called from worker threads too, so it must be thread-safe.
+    fresh=True bypasses the agent-run cache so a re-analysis genuinely re-runs
+    (evidence is still reused from cache to avoid re-paying for search)."""
     emit = on_event or (lambda *a, **k: None)
     evidence, lessons = pipeline.gather_evidence(market)
     emit("evidence", {"count": len(evidence), "lessons": len(lessons)})
@@ -82,7 +85,7 @@ def run_forecast(market: dict, on_event=None) -> Forecast:
 
     def _task(i: int) -> Optional[ForecastRun]:
         try:
-            r = _run_once(market, ev_text, le_text, i)
+            r = _run_once(market, ev_text, le_text, i, fresh)
         except BudgetExceeded:
             raise            # hard cap — never mask it as a failed run
         except Exception as e:  # capture the REAL cause instead of silently dropping it

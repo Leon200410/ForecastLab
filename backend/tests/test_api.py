@@ -66,11 +66,33 @@ def test_bet_requires_existing_forecast():
                                          "stake": 10, "entry_prob": 0.5}).status_code == 400
 
 
+def test_eval_summary_breaks_down_by_category():
+    """Each category routes to its own agent — /api/eval/summary must join the
+    market's category onto each resolved forecast and group the scorecard by it."""
+    with TestClient(app) as c:
+        for mid, fid, cat in [("mc", "fc", "加密"), ("ms", "fs", "体育")]:
+            db.put("markets", {"id": mid, "question": "Q", "status": "open", "category": cat,
+                               "current_prob": 0.5, "created_at": now_iso()})
+            db.put("forecasts", {"id": fid, "market_id": mid, "agent_prob": 0.8,
+                                 "market_prob_at_analysis": 0.5, "confidence": "med", "rationale": "r",
+                                 "key_factors": [], "runs": [], "retrieved_lessons": [], "evidence": [],
+                                 "created_at": now_iso(), "status": "pending"})
+            m = db.get("markets", mid)
+            m.update({"status": "resolved", "resolution": 1, "current_prob": 1.0})
+            db.put("markets", m)
+            poller._resolve_market(mid, 1)
+
+        bc = c.get("/api/eval/summary").json()["forecasts"]["by_category"]
+        assert set(bc) == {"加密", "体育"}
+        assert bc["加密"]["n"] == 1 and bc["加密"]["accuracy"] == 1.0  # 0.8→YES, outcome 1
+
+
 def test_health_reports_real_providers():
     with TestClient(app) as c:
         h = c.get("/api/health").json()
         assert h["llm"] in ("deepseek", "anthropic")  # never "mock"
-        assert h["search"] in ("tavily", "serper")
+        # search may be a single provider or a fallback chain like "tavily→serper"
+        assert h["search"] and all(p in ("tavily", "serper") for p in h["search"].split("→"))
 
 
 def test_agent_routing_crypto_gets_price_tool():

@@ -10,9 +10,12 @@ export default function BetForm({ position, onClose, onDone }: {
 }) {
   const toast = useToast()
   const yesPrice = position.market_current_prob ?? position.market_prob_at_analysis
-  const [side, setSide] = useState<Side>('YES')
+  // Default to the side the analysis leans toward (hard 0.5 split, matching verdict()),
+  // falling back to YES at a dead-even 0.5.
+  const analysisSide: Side = position.agent_prob >= 0.5 ? 'YES' : 'NO'
+  const [side, setSide] = useState<Side>(analysisSide)
   const [stake, setStake] = useState(100)
-  const [entry, setEntry] = useState(round2(yesPrice))
+  const [entry, setEntry] = useState(round2(analysisSide === 'YES' ? yesPrice : 1 - yesPrice))
   const [note, setNote] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)

@@ -39,7 +39,7 @@ def main(limit: int = 50) -> None:
               "markets written). Re-run when the network is up.")
 
     print(f"  llm={settings.llm_mode} (ready={settings.llm_ready})  "
-          f"search={settings.search_mode} (ready={settings.search_ready})  "
+          f"search={settings.search_label} (ready={settings.search_ready})  "
           f"embedding={settings.embedding_provider}")
     if not settings.llm_ready:
         print("  NOTE: LLM not ready - set DEEPSEEK_API_KEY (or ANTHROPIC_API_KEY) in .env.")

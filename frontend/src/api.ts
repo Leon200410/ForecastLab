@@ -9,8 +9,10 @@ const BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 const TOKEN = import.meta.env.VITE_API_TOKEN ?? ''
 
 // SSE stream URL for a live forecast (EventSource can't set headers → token via query).
-export function forecastStreamUrl(marketId: string): string {
+// fresh=true forces a re-analysis that bypasses the agent-run cache.
+export function forecastStreamUrl(marketId: string, opts?: { fresh?: boolean }): string {
   const qs = new URLSearchParams({ market_id: marketId })
+  if (opts?.fresh) qs.set('fresh', '1')
   if (TOKEN) qs.set('token', TOKEN)
   return `${BASE}/api/forecasts/stream?${qs.toString()}`
 }
@@ -44,6 +46,8 @@ export const api = {
   forecast: (market_id: string) =>
     req<Forecast>('/api/forecasts', { method: 'POST', body: JSON.stringify({ market_id }) }),
   getForecast: (id: string) => req<Forecast>(`/api/forecasts/${id}`),
+  forecastsByMarket: (marketId: string) =>
+    req<Forecast[]>(`/api/forecasts?market_id=${encodeURIComponent(marketId)}`),
   placeBet: (b: { forecast_id: string; side: string; stake: number; entry_prob: number; note?: string }) =>
     req<Bet>('/api/bets', { method: 'POST', body: JSON.stringify(b) }),
   account: () => req<AccountSummary>('/api/account'),

@@ -48,8 +48,12 @@ class Settings:
     # (thinking burns the token budget on reasoning_content). Default off.
     deepseek_thinking: bool = os.getenv("DEEPSEEK_THINKING", "0") == "1"
 
+    # Ordered providers, comma-separated for a primary→fallback chain (e.g. "tavily,serper").
     search_provider: str = os.getenv("SEARCH_PROVIDER", "tavily").strip() or "tavily"
+    # Independent per-provider keys. SEARCH_API_KEY stays as a back-compat key for the 1st provider.
     search_api_key: str = os.getenv("SEARCH_API_KEY", "").strip()
+    tavily_api_key: str = os.getenv("TAVILY_API_KEY", "").strip()
+    serper_api_key: str = os.getenv("SERPER_API_KEY", "").strip()
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "fastembed").strip() or "fastembed"
     fastembed_model: str = (os.getenv("FASTEMBED_MODEL",
                                       "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2").strip()
@@ -106,13 +110,46 @@ class Settings:
         return bool(self.deepseek_api_key if self.llm_mode == "deepseek"
                     else self.anthropic_api_key)
 
+    def _provider_key(self, provider: str) -> str:
+        """Independent per-provider key; SEARCH_API_KEY still applies to the first provider."""
+        named = {"tavily": self.tavily_api_key, "serper": self.serper_api_key}.get(provider, "")
+        if named:
+            return named
+        first = self.search_provider.split(",")[0].strip().lower()
+        return self.search_api_key if provider == first else ""
+
+    @property
+    def search_chain(self) -> list[tuple[str, str]]:
+        """Ordered (provider, key) to try: primary then fallback(s). Comma-separated
+        SEARCH_PROVIDER (e.g. 'tavily,serper'); only keyed, known providers, deduped."""
+        out: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        for raw in self.search_provider.split(","):
+            p = raw.strip().lower()
+            if p in ("tavily", "serper") and p not in seen:
+                seen.add(p)
+                key = self._provider_key(p)
+                if key:
+                    out.append((p, key))
+        return out
+
     @property
     def search_mode(self) -> str:
-        return self.search_provider if self.search_provider in ("tavily", "serper") else "tavily"
+        """Primary provider (first usable / first configured) — for back-compat displays."""
+        chain = self.search_chain
+        if chain:
+            return chain[0][0]
+        first = self.search_provider.split(",")[0].strip().lower()
+        return first if first in ("tavily", "serper") else "tavily"
+
+    @property
+    def search_label(self) -> str:
+        """Human-readable chain for health/status, e.g. 'tavily→serper'."""
+        return "→".join(p for p, _ in self.search_chain) or self.search_mode
 
     @property
     def search_ready(self) -> bool:
-        return self.search_provider in ("tavily", "serper") and bool(self.search_api_key)
+        return bool(self.search_chain)
 
 
 settings = Settings()

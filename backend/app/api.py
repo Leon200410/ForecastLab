@@ -155,7 +155,7 @@ class BetReq(BaseModel):
 def health():
     return {"ok": True,
             "llm": settings.llm_mode, "llm_ready": settings.llm_ready,
-            "search": settings.search_mode, "search_ready": settings.search_ready,
+            "search": settings.search_label, "search_ready": settings.search_ready,
             "embedding": embedding.active_info(), "data_source": polymarket.last_source}
 
 
@@ -225,7 +225,7 @@ def create_forecast(req: ForecastReq, user: str = Depends(current_user)):
 
 
 @app.get("/api/forecasts/stream")
-def stream_forecast(market_id: str, request: Request):
+def stream_forecast(market_id: str, request: Request, fresh: bool = False):
     """Server-Sent Events: run the agent analysis and push stage events
     (evidence → each ensemble run → aggregate → done) so the UI shows live
     progress instead of blocking on the full ~30s–2min run."""
@@ -242,7 +242,7 @@ def stream_forecast(market_id: str, request: Request):
 
     def worker() -> None:
         try:
-            fc = forecaster.run_forecast(market, on_event=lambda k, d: events.put((k, d)))
+            fc = forecaster.run_forecast(market, on_event=lambda k, d: events.put((k, d)), fresh=fresh)
             audit.record(user, "forecast", market_id)
             events.put(("done", fc.model_dump()))
         except Exception as e:  # surface the underlying cause as-is (no double prefix)
@@ -356,10 +356,12 @@ def review_forecast(forecast_id: str, user: str = Depends(current_user)):
 
 @app.get("/api/eval/summary")
 def eval_summary():
+    cats = {m["id"]: m.get("category") for m in db.list_all("markets")}
     resolved = [
         {"agent_prob": f["agent_prob"], "market_prob": f["market_prob_at_analysis"],
          "outcome": f["outcome"], "agent_prob_cal": f.get("agent_prob_calibrated"),
-         "prompt_version": f.get("prompt_version")}
+         "prompt_version": f.get("prompt_version"),
+         "category": cats.get(f["market_id"]) or "其他"}
         for f in db.list_all("forecasts", status="resolved")
         if f.get("outcome") is not None
     ]

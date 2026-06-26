@@ -245,13 +245,31 @@ tbody tr:last-child td { border-bottom: none; }
 /* ---------- modal ---------- */
 .overlay {
   position: fixed; inset: 0; background: rgba(5, 5, 12, .72); display: flex;
-  align-items: flex-start; justify-content: center; padding: 44px 16px; overflow: auto; z-index: 50;
+  align-items: center; justify-content: center; padding: 44px 16px; overflow: auto; z-index: 50;
 }
 .modal {
   position: relative; background: var(--panel); border: 1px solid var(--border-2);
   border-radius: var(--r-lg); width: 100%; max-width: 720px; padding: 22px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+  max-height: calc(100vh - 88px);
+  max-height: calc(100dvh - 88px);   /* cap to viewport; long content scrolls inside */
+  overflow-y: auto;
 }
+/* list modals: pin the header, scroll only the body, keep the top accent fixed */
+.modal.scrollable { display: flex; flex-direction: column; overflow: hidden; }
+.modal.scrollable .modal-head { flex: 0 0 auto; }
+.modal.scrollable .modal-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+}
+/* on-theme thin scrollbar in place of the chunky default */
+.modal, .modal-body { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+.modal::-webkit-scrollbar, .modal-body::-webkit-scrollbar { width: 10px; }
+.modal::-webkit-scrollbar-thumb, .modal-body::-webkit-scrollbar-thumb {
+  background: var(--border-2); border-radius: 999px;
+  border: 3px solid var(--panel); background-clip: padding-box;
+}
+.modal::-webkit-scrollbar-track, .modal-body::-webkit-scrollbar-track { background: transparent; }
 .modal::before { /* top accent hairline */
   content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px;
   border-radius: var(--r-lg) var(--r-lg) 0 0;

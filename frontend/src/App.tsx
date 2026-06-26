@@ -7,11 +7,12 @@ import MarketsPage from './pages/MarketsPage'
 import PositionsPage from './pages/PositionsPage'
 import PortfolioPage from './pages/PortfolioPage'
 import EvalPage from './pages/EvalPage'
+import AccuracyPage from './pages/AccuracyPage'
 import AuditPage from './pages/AuditPage'
 
 gsap.registerPlugin(useGSAP)
 
-type Tab = 'markets' | 'positions' | 'portfolio' | 'eval' | 'audit'
+type Tab = 'markets' | 'positions' | 'portfolio' | 'eval' | 'accuracy' | 'audit'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('markets')
@@ -39,11 +40,13 @@ export default function App() {
     })
   }, { dependencies: [!!h], scope: appRef })
 
-  // smooth page transition on every tab switch
+  // smooth page transition on every tab switch. clearProps wipes the inline
+  // transform GSAP leaves behind — otherwise .view stays a containing block and
+  // breaks position:fixed for any modal rendered inside it.
   useGSAP(() => {
     const mm = gsap.matchMedia()
     mm.add('(prefers-reduced-motion: no-preference)', () => {
-      gsap.from(viewRef.current, { opacity: 0, y: 10, duration: 0.32, ease: 'power2.out' })
+      gsap.from(viewRef.current, { opacity: 0, y: 10, duration: 0.32, ease: 'power2.out', clearProps: 'transform' })
     })
   }, { dependencies: [tab], scope: viewRef })
 
@@ -79,14 +82,16 @@ export default function App() {
         <button className={tab === 'positions' ? 'active' : ''} onClick={() => setTab('positions')}>分析 / 押注</button>
         <button className={tab === 'portfolio' ? 'active' : ''} onClick={() => setTab('portfolio')}>虚拟组合</button>
         <button className={tab === 'eval' ? 'active' : ''} onClick={() => setTab('eval')}>战绩评估</button>
+        <button className={tab === 'accuracy' ? 'active' : ''} onClick={() => setTab('accuracy')}>准确率</button>
         <button className={tab === 'audit' ? 'active' : ''} onClick={() => setTab('audit')}>审计</button>
       </nav>
 
       <main className="view" ref={viewRef}>
-        {tab === 'markets' && <MarketsPage key="m" onAnalyzed={() => setTab('positions')} />}
+        {tab === 'markets' && <MarketsPage key="m" />}
         {tab === 'positions' && <PositionsPage key="p" />}
         {tab === 'portfolio' && <PortfolioPage key="pf" />}
         {tab === 'eval' && <EvalPage key="e" />}
+        {tab === 'accuracy' && <AccuracyPage key="acc" />}
         {tab === 'audit' && <AuditPage key="a" />}
       </main>
 

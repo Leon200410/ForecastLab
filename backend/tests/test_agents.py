@@ -33,6 +33,32 @@ def test_agent_run_caches_and_short_circuits(monkeypatch, tmp_path):
     assert calls["n"] == 1  # second call served from disk cache — LLM not re-invoked
 
 
+def test_use_cache_false_bypasses_cache(monkeypatch, tmp_path):
+    """An explicit re-analysis (use_cache=False) must re-invoke the agent instead
+    of replaying the same-day cached run — the fix for "re-analyze shows last time"."""
+    monkeypatch.setattr(agents.settings, "cache_dir", tmp_path)
+    monkeypatch.setattr(cache.settings, "cache_dir", tmp_path)
+    monkeypatch.setattr(agents.settings, "deepseek_api_key", "x")
+    calls = {"n": 0}
+
+    class _Stub:
+        def invoke(self, inp, config=None):
+            calls["n"] += 1
+
+            class _M:
+                content = '{"probability":0.5}'
+            return {"messages": [_M()]}
+
+    monkeypatch.setattr(agents, "create_agent", lambda *a, **k: _Stub())
+    market = {"question": "Q?", "description": "d", "close_at": "", "category": "其他"}
+
+    agents.run_category_agent(market, "EV", "LE", temperature=0.3)                   # populate cache
+    agents.run_category_agent(market, "EV", "LE", temperature=0.3)                   # served from cache
+    assert calls["n"] == 1
+    agents.run_category_agent(market, "EV", "LE", temperature=0.3, use_cache=False)  # bypass read
+    assert calls["n"] == 2  # re-invoked despite a populated cache entry
+
+
 def test_recursion_error_falls_back_to_direct_call(monkeypatch, tmp_path):
     """When the tool-loop hits the recursion limit, run_category_agent must still
     return an answer via a direct (no-tools) LLM call instead of raising."""
